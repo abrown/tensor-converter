@@ -5,7 +5,7 @@ use opencv::{
     self,
     core::{CV_32FC3, CV_8UC3},
 };
-use std::path::Path;
+use std::{num::ParseIntError, path::Path, str::FromStr};
 
 /// Convert an image a path to a resized sequence of bytes.
 pub fn convert<P: AsRef<Path>>(
@@ -63,15 +63,19 @@ impl From<opencv::Error> for ConversionError {
         Self(e.message)
     }
 }
+impl From<ParseIntError> for ConversionError {
+    fn from(e: ParseIntError) -> Self {
+        Self(format!("parsing error: {}", e.to_string()))
+    }
+}
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct Dimensions {
     height: i32,
     width: i32,
     channels: i32,
     precision: Precision,
 }
-
 impl Dimensions {
     pub fn new(height: i32, width: i32, channels: i32, precision: Precision) -> Self {
         Self {
@@ -93,8 +97,28 @@ impl Dimensions {
         }
     }
 }
+impl FromStr for Dimensions {
+    type Err = ConversionError;
 
-#[derive(Debug, Clone, Copy)]
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let parts: Vec<&str> = s.trim().split('x').collect();
+        if parts.len() != 4 {
+            return Err(ConversionError("Not enough parts in dimension string; should be [height]x[width]x[channels]x[precision]".to_string()));
+        }
+        let height = i32::from_str(parts[0])?;
+        let width = i32::from_str(parts[1])?;
+        let channels = i32::from_str(parts[2])?;
+        let precision = Precision::from_str(parts[3])?;
+        Ok(Self {
+            height,
+            width,
+            channels,
+            precision,
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum Precision {
     U8,
     FP32,
@@ -105,5 +129,28 @@ impl Precision {
             Self::U8 => 1,
             Self::FP32 => 4,
         }
+    }
+}
+impl FromStr for Precision {
+    type Err = ConversionError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "u8" => Ok(Self::U8),
+            "fp32" => Ok(Self::FP32),
+            _ => Err(ConversionError(format!("unrecognized precision: {}", s))),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    #[test]
+    fn parse() {
+        assert_eq!(
+            Dimensions::from_str("100x20x3xfp32").unwrap(),
+            Dimensions::new(100, 20, 3, Precision::FP32)
+        );
     }
 }

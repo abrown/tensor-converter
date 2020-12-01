@@ -1,22 +1,30 @@
-use std::{env, fs, path::PathBuf};
-use tensor_converter::{convert, Dimensions, Precision};
+use std::{fs, path::PathBuf, str::FromStr};
+use structopt::StructOpt;
+use tensor_converter::{convert, Dimensions};
 
 fn main() {
-    let input_image_path = env::args_os()
-        .nth(1)
-        .expect("Missing input image path; usage: tensor-converter [input.jpg] [output.raw]")
-        .into_string()
-        .unwrap();
-    assert!(PathBuf::from(&input_image_path).is_file());
-    let output_tensor_path = env::args_os()
-        .nth(2)
-        .expect("Missing output tensor path; usage: tensor-converter [input.jpg] [output.raw]");
+    let options = Options::from_args();
 
-    let tensor_data = convert(
-        input_image_path,
-        Dimensions::new(300, 300, 3, Precision::FP32),
-    )
-    .unwrap();
+    let dimensions = Dimensions::from_str(&options.dimensions).expect("TODO");
+    let tensor_data = convert(options.input, dimensions).expect("TODO");
+    fs::write(options.output, tensor_data).expect("Failed to write tensor")
+}
 
-    fs::write(output_tensor_path, tensor_data).expect("Failed to write tensor")
+#[derive(Debug, StructOpt)]
+#[structopt(
+    name = "tensor-converter",
+    about = "Decode and resize images into valid OpenVINO tensors."
+)]
+struct Options {
+    /// Input file.
+    #[structopt(name = "INPUT FILE", parse(from_os_str))]
+    input: PathBuf,
+
+    /// Output file.
+    #[structopt(name = "OUTPUT FILE", parse(from_os_str))]
+    output: PathBuf,
+
+    /// The dimensions of the output file as "[height]x[width]x[channels]x[precision]"; e.g. 300x300x3xfp32.
+    #[structopt(name = "OUTPUT DIMENSIONS")]
+    dimensions: String,
 }
