@@ -1,10 +1,7 @@
 use core::{fmt, slice};
 use log::info;
-use opencv::core::{MatTraitManual, Scalar_};
-use opencv::{
-    self,
-    core::{CV_32FC3, CV_8UC3},
-};
+use opencv::core::{MatTraitManual, MatTrait, Scalar_};
+use opencv;
 use std::{num::ParseIntError, path::Path, str::FromStr};
 
 /// Convert an image a path to a resized sequence of bytes.
@@ -18,12 +15,17 @@ pub fn convert<P: AsRef<Path>>(
         return Err(ConversionError("The path is not a valid file.".to_string()));
     }
 
+    // Decode the source image. This uses the default flags (see
+    // https://docs.opencv.org/master/d4/da8/group__imgcodecs.html#ga288b8b3da0892bd651fce07b3bbd3a56) to match what
+    // OpenVINO's wrapper does (see
+    // https://github.com/openvinotoolkit/openvino/blob/7566e8202fa6c00f27de27889e7bf99d7ddf2636/inference-engine/ie_bridges/c/samples/common/opencv_c_wraper.cpp#L25).
     let src = opencv::imgcodecs::imread(
         &path
             .to_str()
             .ok_or(ConversionError("Unable to stringify the path.".to_string()))?,
         opencv::imgcodecs::IMREAD_COLOR,
     )?;
+    info!("Input image has size = {:?}, channels = {}, type = {}, total items = {}, item size (bytes) = {}", src.size()?, src.channels()?, src.typ()?, src.total()?, src.elem_size1()?);
 
     // Create a destination Mat of the right shape, filling it with 0s (see
     // https://docs.rs/opencv/0.46.3/opencv/core/struct.Mat.html#method.new_rows_cols_with_default).
@@ -34,6 +36,7 @@ pub fn convert<P: AsRef<Path>>(
         dimensions.as_type(),
         Scalar_::all(0.0),
     )?;
+    info!("Empty output image has size = {:?}, channels = {}, type = {}, total items = {}, item size (bytes) = {}", dst.size()?, dst.channels()?, dst.typ()?, dst.total()?, dst.elem_size1()?);
 
     // Resize the `src` Mat into the `dst` Mat using bilinear interpolation (see
     // https://docs.rs/opencv/0.46.3/opencv/imgproc/fn.resize.html).
@@ -46,8 +49,10 @@ pub fn convert<P: AsRef<Path>>(
         0.0,
         opencv::imgproc::INTER_LINEAR,
     )?;
+    info!("After resizing, output image has size = {:?}, channels = {}, type = {}, total items = {}, item size (bytes) = {}", dst.size()?, dst.channels()?, dst.typ()?, dst.total()?, dst.elem_size1()?);
 
-    let dst_slice = unsafe { slice::from_raw_parts(dst.data()? as *const u8, dimensions.len()) };
+    // Copy the bytes of the Mat out to a Vec<u8>.
+    let dst_slice = unsafe { slice::from_raw_parts(dst.data()? as *const u8, dimensions.bytes()) };
     Ok(dst_slice.to_vec())
 }
 
@@ -69,7 +74,7 @@ impl From<ParseIntError> for ConversionError {
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Dimensions {
     height: i32,
     width: i32,
@@ -77,6 +82,7 @@ pub struct Dimensions {
     precision: Precision,
 }
 impl Dimensions {
+    /// Construct a new dimensions object.
     pub fn new(height: i32, width: i32, channels: i32, precision: Precision) -> Self {
         Self {
             height,
@@ -85,14 +91,19 @@ impl Dimensions {
             precision,
         }
     }
-    pub fn len(&self) -> usize {
-        self.height as usize * self.width as usize * self.channels as usize * self.precision.len()
+
+    /// Return the number of bytes that the dimensions should occupy.
+    pub fn bytes(&self) -> usize {
+        self.height as usize * self.width as usize * self.channels as usize * self.precision.bytes()
     }
+
+    /// See https://docs.opencv.org/2.4/modules/core/doc/basic_structures.html for a description of the various OpenCV
+    /// primitive types.
     fn as_type(&self) -> i32 {
         use Precision::*;
         match (self.precision, self.channels) {
-            (FP32, 3) => CV_32FC3,
-            (U8, 3) => CV_8UC3,
+            (FP32, 3) => opencv::core::CV_32FC3,
+            (U8, 3) => opencv::core::CV_8UC3,
             _ => unimplemented!(),
         }
     }
@@ -118,13 +129,14 @@ impl FromStr for Dimensions {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Precision {
     U8,
     FP32,
 }
 impl Precision {
-    pub fn len(&self) -> usize {
+    /// Return the number of bytes occupied by the precision.
+    pub fn bytes(&self) -> usize {
         match self {
             Self::U8 => 1,
             Self::FP32 => 4,

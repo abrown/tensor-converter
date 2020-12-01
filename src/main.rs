@@ -1,12 +1,13 @@
 use std::{fs, path::PathBuf, str::FromStr};
 use structopt::StructOpt;
 use tensor_converter::{convert, Dimensions};
+use pretty_env_logger;
 
 fn main() {
+    pretty_env_logger::init();
     let options = Options::from_args();
-
-    let dimensions = Dimensions::from_str(&options.dimensions).expect("TODO");
-    let tensor_data = convert(options.input, dimensions).expect("TODO");
+    let dimensions = Dimensions::from_str(&options.dimensions).expect("Failed to parse dimensions");
+    let tensor_data = convert(options.input, dimensions).expect("Failed to convert image");
     fs::write(options.output, tensor_data).expect("Failed to write tensor")
 }
 
